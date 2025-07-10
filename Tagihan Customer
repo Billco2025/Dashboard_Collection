@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Status Tagihan</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    .filters, .chart-container, .table-container, .delayed-container, .timeline-container {
+      margin-bottom: 30px;
+    }
+    select, input[type="file"], button {
+      padding: 5px;
+      margin-right: 10px;
+    }
+    canvas {
+      max-width: 600px;
+    }
+    table {
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 Dashboard Status Tagihan</h1>
+
+  <div class="filters">
+    <label>Filter Area:</label>
+    <select id="filter-area">
+      <option value="">Semua</option>
+    </select>
+
+    <label>Filter Status:</label>
+    <select id="filter-status">
+      <option value="">Semua</option>
+    </select>
+
+    <label>Upload CSV/XLSX:</label>
+    <input type="file" id="dataFile" accept=".csv, .xlsx" />
+    <button id="exportCsv">Export CSV</button>
+  </div>
+
+  <div class="chart-container">
+    <h2>Status Tagihan</h2>
+    <canvas id="statusChart"></canvas>
+  </div>
+
+  <div class="timeline-container">
+    <h2>Timeline Update Tagihan</h2>
+    <canvas id="timelineChart"></canvas>
+  </div>
+
+  <div class="table-container">
+    <h2>Detail Tagihan</h2>
+    <table id="data-table" class="display">
+      <thead>
+        <tr>
+          <th>AREA</th><th>NO. INVOICE</th><th>CUSTOMER</th><th>PORTOFOLIO</th><th>SEGMENT</th>
+          <th>NAMA PEKERJAAN</th><th>PIC</th><th>TANGGAL INVOICE</th><th>STATUS TAGIHAN</th><th>TANGGAL UPDATE</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="delayed-container">
+    <h2>⏰ Tagihan Terlambat (>30 Hari)</h2>
+    <ul id="late-list"></ul>
+  </div>
+
+  <script>
+    let sampleData = [
+      {area: 'Jakarta', invoice: 'INV001', customer: 'ABC Corp', portofolio: 'IT', segment: 'Retail', nama: 'Pekerjaan A', pic: 'Rina', tgl_invoice: '2024-05-01', status: 'SUBMIT TAGIHAN CUSTOMER', tgl_update: '2024-05-02'},
+      {area: 'Surabaya', invoice: 'INV002', customer: 'XYZ Ltd', portofolio: 'Infra', segment: 'Enterprise', nama: 'Pekerjaan B', pic: 'Budi', tgl_invoice: '2024-05-03', status: 'LOGISTIK', tgl_update: '2024-05-06'},
+      {area: 'Jakarta', invoice: 'INV003', customer: 'DEF Inc', portofolio: 'HR', segment: 'Gov', nama: 'Pekerjaan C', pic: 'Tina', tgl_invoice: '2024-05-05', status: 'FINANCE', tgl_update: '2024-05-10'},
+      {area: 'Bandung', invoice: 'INV004', customer: 'LMN Co', portofolio: 'IT', segment: 'Retail', nama: 'Pekerjaan D', pic: 'Rina', tgl_invoice: '2024-05-06', status: 'SIRKULIR SPP', tgl_update: '2024-05-08'}
+    ];
+
+    const table = $('#data-table').DataTable();
+
+    function updateTable(filterArea = '', filterStatus = '') {
+      table.clear();
+      const filtered = sampleData.filter(row =>
+        (!filterArea || row.area === filterArea) &&
+        (!filterStatus || row.status === filterStatus)
+      );
+
+      filtered.forEach(row => {
+        table.row.add([
+          row.area, row.invoice, row.customer, row.portofolio, row.segment,
+          row.nama, row.pic, row.tgl_invoice, row.status, row.tgl_update
+        ]);
+      });
+
+      table.draw();
+    }
+
+    function updateChart(data) {
+      const counts = {};
+      data.forEach(row => {
+        counts[row.status] = (counts[row.status] || 0) + 1;
+      });
+
+      const ctx = document.getElementById('statusChart').getContext('2d');
+      if (window.statusChart && typeof window.statusChart.destroy === 'function') {
+        window.statusChart.destroy();
+      }
+      window.statusChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(counts),
+          datasets: [{
+            label: 'Jumlah Tagihan',
+            data: Object.values(counts),
+            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {scales: {y: {beginAtZero: true}}}
+      });
+    }
+
+    function updateTimeline(data) {
+      const daily = {};
+      data.forEach(row => {
+        if (row.tgl_update) {
+          daily[row.tgl_update] = (daily[row.tgl_update] || 0) + 1;
+        }
+      });
+      const ctx = document.getElementById('timelineChart').getContext('2d');
+      if (window.timelineChart && typeof window.timelineChart.destroy === 'function') {
+        window.timelineChart.destroy();
+      }
+      window.timelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: Object.keys(daily),
+          datasets: [{
+            label: 'Update per Hari',
+            data: Object.values(daily),
+            fill: false,
+            borderColor: 'rgba(255,99,132,1)',
+            tension: 0.1
+          }]
+        },
+        options: {scales: {y: {beginAtZero: true}}}
+      });
+    }
+
+    function updateLateList() {
+      const now = new Date();
+      const delayItems = sampleData.filter(row => {
+        const invDate = new Date(row.tgl_invoice);
+        const selisih = (now - invDate) / (1000 * 60 * 60 * 24);
+        return row.status !== 'TAGIHAN CANCEL' && selisih > 30;
+      });
+      $('#late-list').html('');
+      delayItems.forEach(item => {
+        $('#late-list').append(`<li>${item.invoice} - ${item.customer} (${Math.round((new Date() - new Date(item.tgl_invoice)) / (1000 * 60 * 60 * 24))} hari)</li>`);
+      });
+    }
+
+    function populateFilters() {
+      const areaSet = new Set();
+      const statusSet = new Set();
+      sampleData.forEach(row => {
+        areaSet.add(row.area);
+        statusSet.add(row.status);
+      });
+      $('#filter-area').html('<option value="">Semua</option>');
+      $('#filter-status').html('<option value="">Semua</option>');
+      areaSet.forEach(val => $('#filter-area').append(`<option value="${val}">${val}</option>`));
+      statusSet.forEach(val => $('#filter-status').append(`<option value="${val}">${val}</option>`));
+    }
+
+    function refreshAll() {
+      populateFilters();
+      updateTable();
+      updateChart(sampleData);
+      updateTimeline(sampleData);
+      updateLateList();
+    }
+
+    $('#filter-area, #filter-status').on('change', function () {
+      const area = $('#filter-area').val();
+      const status = $('#filter-status').val();
+      updateTable(area, status);
+      const filtered = sampleData.filter(row =>
+        (!area || row.area === area) &&
+        (!status || row.status === status)
+      );
+      updateChart(filtered);
+      updateTimeline(filtered);
+      updateLateList();
+    });
+
+    $('#dataFile').on('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'csv') {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: function (results) {
+            sampleData = results.data.map(row => convertRow(row));
+            refreshAll();
+          }
+        });
+      } else if (ext === 'xlsx') {
+        reader.onload = function (e) {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, {type: 'array'});
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(firstSheet, {raw: true});
+          sampleData = json.map(row => convertRow(row));
+          refreshAll();
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        alert('Format tidak didukung. Gunakan .csv atau .xlsx');
+      }
+    });
+
+    function convertRow(row) {
+      return {
+        area: row["AREA"],
+        invoice: row["NO. INVOICE"],
+        customer: row["CUSTOMER"],
+        portofolio: row["PORTOFOLIO"],
+        segment: row["SEGMENT"],
+        nama: row["NAMA PEKERJAAN"],
+        pic: row["PIC"],
+        tgl_invoice: row["TANGGAL INVOICE"],
+        status: row["STATUS TAGIHAN"],
+        tgl_update: row["TANGGAL UPDATE"]
+      };
+    }
+
+    $('#exportCsv').on('click', function () {
+      const headers = ["AREA","NO. INVOICE","CUSTOMER","PORTOFOLIO","SEGMENT","NAMA PEKERJAAN","PIC","TANGGAL INVOICE","STATUS TAGIHAN","TANGGAL UPDATE"];
+      const csv = Papa.unparse({
+        fields: headers,
+        data: sampleData.map(row => headers.map(h => row[h.toLowerCase().replaceAll(" ", "_")]))
+      });
+      const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'tagihan.csv';
+      link.click();
+    });
+
+    $(document).ready(() => {
+      refreshAll();
+    });
+  </script>
+</body>
+</html>
